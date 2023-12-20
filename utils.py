@@ -1,16 +1,14 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
-
-
 import stumpy
 import numpy as np
-import random
+import math
 import pickle
-from tqdm.auto import tqdm
 
-# In[2]:
+from statistics import mean
+from tqdm.auto import tqdm
+from multiprocessing import Pool
 
 
 '''
@@ -25,17 +23,18 @@ Input:
 Output:
     Matrix profile of trace1 compared with trace2
 '''
-def compare_profile(trace1, id2, num_traces, shapelet_size):
+def compare_profile(trace1, trace2, shapelet_size):
     
-    trace2 = []
-    while len(trace2) < shapelet_size:
-        trace2 = random.sample(traces[id2], num_traces)
-        trace2 = np.asarray([item for row in trace2 for item in row]).astype('float64')
+    length_diff = len(trace2) - len(trace1)
+    if(length_diff < 0):
+        trace2 = np.append(trace2, [np.nan] * abs(length_diff))
+        
+    #print(len(trace1))
+    #print(len(trace2))
+        
     
-    #print("self-profiles generated...")
     c1_c2 = stumpy.stump(trace1, shapelet_size, trace2, ignore_trivial=False)[:, 0].astype(float)
     c1_c2[c1_c2 == np.inf] = np.nan
-    #print("Comparison profiles generated...")
     
     return c1_c2
 
@@ -89,7 +88,7 @@ def find_overlap(trace_i, shapelets_i, shapelet_size):
     return trace_i[start:end]
 
 
-# In[3]:
+# In[ ]:
 
 
 '''
@@ -106,23 +105,32 @@ Output:
 
 '''
 
-def generate_shapelets(num_traces, shapelet_size):
+# !!! Choice of prototype - select min dist from each sample to all others
+# ! shapelet size
+
+# ! distace between comparing sample trace and shapelet (DTW? vs euclidean)
+
+# ! cross-validation on classifier (5 or 10 - fold) 
+# ! classifier parameters
+
+# make results of changes at each stage for comparison (when writing paper)
+
+
+def generate_shapelets(shapelet_coeff):
     shapelet_storage = []
     
     # loop over all classes (generate shapelet for each class)
     for i in tqdm(range(100)):
         
-        # get num_traces samples from trace #i
-        # while loop guarantees that the traces selected exceed shapelet size (or crashes will happen)
-        trace_i = []
-        while len(trace_i) < shapelet_size:
-            trace_i = random.sample(traces[i], num_traces)
-            trace_i = np.asarray([item for row in trace_i for item in row]).astype('float64')
+        # get the chosen sample from trace i
+        trace_i = chosen_traces[i].astype('float64')
+        shapelet_size = math.floor(shapelet_coeff * len(trace_i))
         
         shapelets_i = np.zeros((100, len(trace_i)))
         #print(shapelets_i.shape)
         
         # generate profile of i compared with itself
+        # length of sample is coeff* len*trace_i
         ci_ci = same_profile(trace_i, shapelet_size)
         
         # loop over every other class and generate a profile for each one
@@ -130,9 +138,11 @@ def generate_shapelets(num_traces, shapelet_size):
             # don't compare i with itself 
             if i == j:
                 continue
-
+            
+            trace_j = chosen_traces[j].astype('float64')
+            
             # compute profile of i compared with j
-            ci_cj = compare_profile(trace_i, j, num_traces, shapelet_size)
+            ci_cj = compare_profile(trace_i, trace_j, shapelet_size)
 
             # find largest value gap between other and i
             diff_ci = ci_cj - ci_ci
@@ -150,7 +160,7 @@ def generate_shapelets(num_traces, shapelet_size):
     return shapelet_storage   
 
 
-# In[4]:
+# In[ ]:
 
 
 '''
@@ -174,7 +184,10 @@ def distance_to_shapelet(data, shapelets):
         shapelet_score = np.empty(len(shapelets))
         # for each shapelet, calculate distance and assign a score
         for j,shapelet in enumerate(shapelets):
-            dist = stumpy.mass(shapelet, sample)
+            try:
+                dist = stumpy.mass(shapelet, sample)
+            except ValueError:
+                dist = stumpy.mass(sample, shapelet)
             shapelet_score[j] = dist.min()
         data_out[i] = shapelet_score
     
@@ -197,41 +210,30 @@ Output:
     y values for classifier of shape (None, )
 '''
 
-def process_traces(num_traces, shapelets, shapelet_size, save=True, filenames=("X.pkl","y.pkl")):
+def process_traces(num_traces, shapelets):
     X, y = [], []
 
-    for i in range(num_traces):
-        random_id = random.randrange(100)
-        random_trace = random.choice(traces[random_id])
-        X.append([random_trace])
-        y.append(random_id)
-
+    # iterate over dictionary and re-format into X and y
+    for trace_id, trace_vals in traces.items():
+        for trace in trace_vals:
+            X.append(trace)
+            y.append(trace_id)
+    
+    print("Size of X: " + str(len(X)))
+    
     # process and remove useless entries (too short)
     X = [np.asarray(trace).astype('float64') for trace in X]
     X = [trace[~np.isnan(trace)] for trace in X]    
-    removals = [i for i,x in enumerate(X) if len(x) < shapelet_size]
-    for idx in removals:
-        X[idx] = None
-        y[idx] = None
-    X = [trace for trace in X if trace is not None]
-    y = [value for value in y if value is not None]
 
     # compute distance between input trace and shapelet arrays
     # return as new X
 
     X = distance_to_shapelet(X, shapelets)
     
-    if save:
-        with open(filenames[0], 'wb') as f:
-            pickle.dump(X, f)
-
-        with open(filenames[1], 'wb') as f:
-            pickle.dump(y, f)
-    
     return X, y
 
 
-# In[5]:
+# In[ ]:
 
 
 '''
@@ -249,6 +251,7 @@ Output:
 def classifier_performance(clf, X, y, topk=[1,3,5]):
     
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1)
+    
     clf.fit(X_train, y_train)
     y_prob = clf.predict_proba(X_test)
     
@@ -264,7 +267,7 @@ def classifier_performance(clf, X, y, topk=[1,3,5]):
     return scores
 
 
-# In[9]:
+# In[ ]:
 
 
 '''
@@ -278,28 +281,30 @@ Output: a new file located in ../results/param1-val1_param2-val2_param3-val3
 # and function can only have 1 argument
 # list input which is immediately used for what would be the arguments
 def evaluate_parameters(arr):
+
+    num_experiment = arr[0]
+    shapelet_coeff = arr[1]
+    num_samples = 0
     
-    global traces
-    with open('../nonzero_traces.npy', 'rb') as f:
-        traces = pickle.load(f)
-    
-    num_shapelet_samples = arr[0]
-    shapelet_size = arr[1]
-    num_clf_samples = arr[2]
-    
-    filename = '../results/shapelets/' + 'num=' + str(num_shapelet_samples) + 'size=' + str(shapelet_size)
+    filename = '../results/shapelets/' + 'num=' + str(num_experiment) + 'size=' + str(shapelet_coeff)
+    #filename = '../results/data/trace_choice'
     with open(filename, 'rb') as f:
         shapelets = pickle.load(f)
     
-    print("Processing Traces...")
-    X, y = process_traces(num_clf_samples, shapelets, shapelet_size, False)
+    shapelets = [shapelet.astype('float64') for shapelet in shapelets]
     
-    filename = '../results/data/X/' + 'num=' + str(num_shapelet_samples) + 'size=' + str(shapelet_size) + 'samples=' + str(num_clf_samples)
+    X, y = process_traces(num_samples, shapelets)
+    
+    filename = '../results/data/X/' + 'num=' + str(num_experiment) + 'size=' + str(shapelet_coeff)
     
     with open(filename, 'wb') as f:
         pickle.dump(X, f)
         
-    filename = '../results/data/y/' + 'num=' + str(num_shapelet_samples) + 'size=' + str(shapelet_size) + 'samples=' + str(num_clf_samples)
+    filename = '../results/data/y/' + 'num=' + str(num_experiment) + 'size=' + str(shapelet_coeff)
     
     with open(filename, 'wb') as f:
         pickle.dump(y, f)
+
+global traces
+with open('../ipt_traces.npy', 'rb') as f:
+    traces = pickle.load(f)
