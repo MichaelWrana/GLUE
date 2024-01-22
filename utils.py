@@ -306,5 +306,5 @@ def evaluate_parameters(arr):
         pickle.dump(y, f)
 
 global traces
-with open('../ipt_traces.npy', 'rb') as f:
+with open('../nonzero_traces.npy', 'rb') as f:
     traces = pickle.load(f)
