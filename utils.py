@@ -80,7 +80,7 @@ def evaluate_parameters(namestring):
         pickle.dump(y, f)
 
 global traces
-with open("../ds19.npy", 'rb') as f:
+with open("../datasets/ds19.npy", 'rb') as f:
     traces = pickle.load(f)
 
 global folder_scores
