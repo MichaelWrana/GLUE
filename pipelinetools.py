@@ -43,14 +43,22 @@ Input:
     name_list: the list of names to be assigned to the shapelets
 '''
 def save_shapelets(shapelets, name_list):
+    if isinstance(name_list, str):
+        filename = folder['results'] + folder['shapelets'] + name_list
+        with open(filename, 'wb') as f:
+            dump(shapelets, f)
+        return
+
     if len(shapelets) != len(name_list):
         raise IndexError("Number of filenames and shapelets do not match")
-    
+
     for i, name in enumerate(name_list):
         filename = folder['results'] + folder['shapelets'] + name
         print("Saving shapelets as " + filename)
         with open(filename, 'wb') as f:
             dump(shapelets[i], f)
+    
+    return
 
 ''' save_xy
 Saves X and y lists to a file based on provided arguments
@@ -132,7 +140,7 @@ def load_xy(name_list, merge=False):
         Xi = _load_single(name, 'X')
         X = X + (Xi, )
     if merge:
-        X = np.concatenate(X, axis=1)
+        X = np.concatenate(np.asarray(X), axis=1)
     
     y = _load_single(name_list[0], 'y')
 
@@ -278,7 +286,11 @@ def generate_random_shapelets(traces, number):
         for website_id in traces: # go through each class
             website_shapelets[website_id] = random.choice(traces[website_id]) # select a random trace
         shapelets = shapelets + (website_shapelets, ) # append to tuple
-    return shapelets
+
+    if number == 1:
+        return shapelets[0]
+    else:
+        return shapelets
 
 
 def _reformat_cluster_shapelets(shapelets, number):
@@ -372,13 +384,22 @@ Input:
 def compute_shapelet_distances_mp(parameter_list):
     
     # distance function we were using before
-    def stumpy_distance(shapelet, trace):
+    def stumpy_min(shapelet, trace):
         from stumpy import mass
         try:
             distance = mass(shapelet, trace)
         except ValueError:
             distance = mass(trace, shapelet)
         return distance.min()
+    
+    # distance function we were using before
+    def stumpy_mean(shapelet, trace):
+        from stumpy import mass
+        try:
+            distance = mass(shapelet, trace)
+        except ValueError:
+            distance = mass(trace, shapelet)
+        return np.mean(distance)
     
     # sample alternate option
     def euclidean(shapelet, trace):
@@ -390,10 +411,14 @@ def compute_shapelet_distances_mp(parameter_list):
     shapelets = parameter_list[3]
     distance_func = parameter_list[4]
 
-    if distance_func == "stumpy":
-        compare_distance = stumpy_distance
+    if distance_func == "stumpy_min":
+        compare_distance = stumpy_min
+    elif distance_func == "stumpy_mean":
+        compare_distance = stumpy_mean
     elif distance_func == "euclidean":
         compare_distance = euclidean
+    else:
+        raise NameError("Invalid Distance Function Selected")
 
     new_X = compute_shapelet_distances(X, shapelets, compare_distance)
 
