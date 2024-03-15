@@ -134,6 +134,11 @@ def load_xy(name_list, merge=False):
         X = _load_single(name_list, 'X')
         y = _load_single(name_list, 'y')
         return X, y
+    
+    if len(name_list) == 1:
+        X = _load_single(name_list[0], 'X')
+        y = _load_single(name_list[0], 'y')
+        return X, y
 
     X = ()
     for name in name_list:
@@ -173,7 +178,15 @@ Output:
     new_trace: the same trace with only positive-valued packets
 '''
 def _process_trace_positive(trace):
-    new_trace = np.asarray(trace[trace >= 0.0], dtype='float32')
+    new_trace = np.zeros(len(trace))
+    last_positive = np.float64(0.0)
+    for i in range(len(trace)):
+        if trace[i] >= 0.0:
+            last_positive = trace[i]
+            new_trace[i] = trace[i]
+        else:
+            new_trace[i] = last_positive
+            
     return new_trace
 
 ''' process_trace_negative
@@ -183,7 +196,15 @@ Output:
     new_trace: the same trace with only negative-valued packets
 '''
 def _process_trace_negative(trace):
-    new_trace = np.asarray(trace[trace <= 0.0], dtype='float32')
+    new_trace = np.zeros(len(trace))
+    last_negative = np.float64(0.0)
+    for i in range(len(trace)):
+        if trace[i] <= 0.0:
+            last_positive = trace[i]
+            new_trace[i] = trace[i]
+        else:
+            new_trace[i] = last_positive
+            
     return new_trace
 
 ''' process_trace_zeros
