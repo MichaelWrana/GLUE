@@ -1,5 +1,6 @@
 import random
 import numpy as np
+import bz2
 
 from tqdm import tqdm
 from itertools import product
@@ -413,18 +414,74 @@ def compute_shapelet_distances_mp(parameter_list):
             distance = mass(trace, shapelet)
         return distance.min()
     
-    # distance function we were using before
-    def stumpy_mean(shapelet, trace):
-        from stumpy import mass
-        try:
-            distance = mass(shapelet, trace)
-        except ValueError:
-            distance = mass(trace, shapelet)
-        return np.mean(distance)
+    def euclid_align_pos(trace, sample):
+        return euclid_align_dist(trace, sample, 'p')
     
-    # sample alternate option
-    def euclidean(shapelet, trace):
-        return None
+    def euclid_align_neg(trace, sample):
+        return euclid_align_dist(trace, sample, 'n')
+    
+    def euclid_align_dist(trace, sample, mode):
+        distances = []
+        
+        for i in range(0, len(sample)-len(trace)):
+            sample_slice = sample[i:i+len(trace)]
+            moved_slice = []
+
+            if mode == 'p':
+                moved_slice = sample_slice - sample_slice[0]
+            elif mode == 'n':
+                moved_slice = sample_slice + abs(sample_slice[0])
+
+            distance = np.linalg.norm(trace - moved_slice)
+            distances.append(distance)
+        try:
+            return min(distances)
+        except ValueError:
+            return 0
+        
+    def sax_bins(packets, n_letters):
+
+        bins = np.percentile(
+            packets[packets != 0],
+            np.linspace(0, 100, n_letters + 1)
+        )
+        bins[0] = 0
+        bins[-1] = 1e1000
+        return bins
+
+    def sax_transform(packets, bins):
+
+        indices = np.digitize(packets, bins) - 1
+        alphabet = np.array([*("abcdefghijklmnopqrstuvwxyz"[:len(bins) - 1])])
+        text = "".join(alphabet[indices])
+        return str.encode(text)
+        
+    def cbd_dist(trace, sample):
+        if(len(trace) >= len(sample)):
+            return 0
+        distances = []
+        try:
+            pos_trace = abs(trace)
+            pos_sample = abs(sample)
+
+            t_bins = sax_bins(pos_trace, 24)
+            t_letters = sax_transform(pos_trace, t_bins)
+            t_len = len(bz2.compress(t_letters))
+
+            for i in range(0, len(sample)-len(trace), 5):
+                sample_slice = pos_sample[i:i+len(trace)]
+                s_bins = sax_bins(sample_slice, 24)
+                s_letters = sax_transform(sample_slice, s_bins)
+                s_len = len(bz2.compress(s_letters))
+
+                len_combo = len(bz2.compress(t_letters + s_letters))
+
+                distance = len_combo / (t_len + s_len)
+                distances.append(distance)
+        except IndexError:
+            return 0
+        
+        return min(distances)
     
     name = parameter_list[0]
     X = parameter_list[1]
@@ -432,12 +489,14 @@ def compute_shapelet_distances_mp(parameter_list):
     shapelets = parameter_list[3]
     distance_func = parameter_list[4]
 
-    if distance_func == "stumpy_min":
+    if distance_func == "stumpy":
         compare_distance = stumpy_min
-    elif distance_func == "stumpy_mean":
-        compare_distance = stumpy_mean
-    elif distance_func == "euclidean":
-        compare_distance = euclidean
+    elif distance_func == "euclid_align_pos":
+        compare_distance = euclid_align_pos
+    elif distance_func == "euclid_align_neg":
+        compare_distance = euclid_align_neg
+    elif distance_func == "cbd":
+        compare_distance = cbd_dist
     else:
         raise NameError("Invalid Distance Function Selected")
 
